@@ -1,0 +1,36 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      docker: 19
+    commands:
+      - touch ~/.ssh/id_rsa.pub && chmod 644 ~/.ssh/id_rsa.pub && echo $INFRA_DEPLOY_KEY >> ~/.ssh/id_rsa.pub
+      - touch ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa && echo $INFRA_DEPLOY_KEY_PRIV | tr -d "\"" >> ~/.ssh/id_rsa
+      - echo "  AddKeysToAgent yes\n  IdentityFile ~/.ssh/id_rsa" >> ~/.ssh/config
+      - ssh-keygen -F github.com || ssh-keyscan github.com >> ~/.ssh/known_hosts
+      - git config --global url."git@github.com:".insteadOf "https://github.com/"
+      - eval "$(ssh-agent -s)"
+      - ssh-add ~/.ssh/id_rsa
+      - wget https://releases.hashicorp.com/terraform/1.0.5/terraform_1.0.5_linux_amd64.zip
+      - echo "hey"
+      - unzip terraform_1.0.5_linux_amd64.zip
+      - mv terraform /usr/local/bin/
+      - terraform --version
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - $(aws ecr get-login --no-include-email --region $AWS_DEFAULT_REGION)
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo Running the terraform plan...
+      - ./run.sh
+      - echo Building the Docker image...
+      - docker build --build-arg INFRA_DEPLOY_KEY --build-arg INFRA_DEPLOY_KEY_PRIV -t $IMAGE_REPO_NAME:$IMAGE_TAG .
+      - docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing the Docker image...
+      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG
